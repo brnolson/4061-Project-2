@@ -57,16 +57,35 @@ int main(int argc, char **argv) {
         const char *first_token = strvec_get(&tokens, 0);
 
         if (strcmp(first_token, "pwd") == 0) {
-            // TODO Task 1: Print the shell's current working directory
-            // Use the getcwd() system call
+            // Printing out working directory
+            char cwd[CMD_LEN];
+            if (getcwd(cwd, sizeof(cwd)) != NULL) {
+               printf("%s\n", cwd);
+            }
+
+            else {
+                perror("getcwd");
+            }
         }
 
         else if (strcmp(first_token, "cd") == 0) {
-            // TODO Task 1: Change the shell's current working directory
-            // Use the chdir() system call
-            // If the user supplied an argument (token at index 1), change to that directory
-            // Otherwise, change to the home directory by default
-            // This is available in the HOME environment variable (use getenv())
+            // Changing directory based on input
+            const char *dir;
+
+            if (tokens.length > 1) {
+                dir = strvec_get(&tokens, 1);
+            }
+            else {
+                dir = getenv("HOME");
+            }
+
+            if (dir == NULL) {
+                fprintf(stderr, "cd: HOME not set\n");
+            }
+
+            else if (chdir(dir) == -1) {
+                perror("chdir");
+            }
         }
 
         else if (strcmp(first_token, "exit") == 0) {
@@ -127,6 +146,24 @@ int main(int argc, char **argv) {
             //   1. Use fork() to spawn a child process
             //   2. Call run_command() in the child process
             //   2. In the parent, use waitpid() to wait for the program to exit
+            pid_t pid = fork();
+
+            if (pid < 0) {
+                perror("fork");
+            }
+
+            else if (pid == 0) {
+                if (run_command(&tokens) == -1) {
+                    _exit(1);
+                }
+            }
+
+            else {
+                int status;
+                if (waitpid(pid, &status, 0) == -1) {
+                    perror("waitpid");
+                }
+            }
 
             // TODO Task 4: Set the child process as the target of signals sent to the terminal
             // via the keyboard.

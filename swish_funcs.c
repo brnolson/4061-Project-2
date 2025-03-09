@@ -19,14 +19,11 @@
 #define MAX_ARGS 10
 
 int tokenize(char *s, strvec_t *tokens) {
-    // TODO Task 0: Tokenize string s
-    // Assume each token is separated by a single space (" ")
-    // Use the strtok() function to accomplish this
-    // Add each token to the 'tokens' parameter (a string vector)
-    // Return 0 on success, -1 on error
+    // Clear tokens if there is any
     strvec_clear(tokens);
     char *token = strtok(s, " ");
 
+    // Loop through all tokens and add it to the strvec struct
     while (token != NULL) {
         if (strvec_add(tokens, token) != 0) {
             fprintf(stderr, "Error: Failed to add token\n");
@@ -44,6 +41,16 @@ int run_command(strvec_t *tokens) {
     // Hint: Build a string array from the 'tokens' vector and pass this into execvp()
     // Another Hint: You have a guarantee of the longest possible needed array, so you
     // won't have to use malloc.
+    char *args[MAX_ARGS];
+    int i;
+    for (i = 0; i < tokens->length && i < MAX_ARGS - 1; i++) {
+        args[i] = strvec_get(tokens, i);
+    }
+    args[i] = NULL;
+
+    execvp(args[0], args);
+    perror("exec");
+    return -1;
 
     // TODO Task 3: Extend this function to perform output redirection before exec()'ing
     // Check for '<' (redirect input), '>' (redirect output), '>>' (redirect and append output)
