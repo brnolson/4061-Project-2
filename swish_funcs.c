@@ -35,30 +35,75 @@ int tokenize(char *s, strvec_t *tokens) {
 }
 
 int run_command(strvec_t *tokens) {
-    // TODO Task 2: Execute the specified program (token 0) with the
-    // specified command-line arguments
-    // THIS FUNCTION SHOULD BE CALLED FROM A CHILD OF THE MAIN SHELL PROCESS
-    // Hint: Build a string array from the 'tokens' vector and pass this into execvp()
-    // Another Hint: You have a guarantee of the longest possible needed array, so you
-    // won't have to use malloc.
     char *args[MAX_ARGS];
-    int i;
-    for (i = 0; i < tokens->length && i < MAX_ARGS - 1; i++) {
-        args[i] = strvec_get(tokens, i);
+    int i, arg_index = 0;
+    int file_in = -1;
+    int file_out = -1;
+    char *input_file = NULL;
+    char *output_file = NULL;
+    int redirect_input = 0;
+    int redirect_output = 0;
+    int append_output = 0;
+
+    for (i = 0; i < tokens->length && arg_index < MAX_ARGS - 1; i++) {
+        char *token = strvec_get(tokens, i);
+
+        if (strcmp(token, "<") == 0 && i + 1 < tokens->length) {
+            redirect_input = 1;
+            input_file = strvec_get(tokens, i + 1);
+            i++;
+        }
+        else if (strcmp(token, ">") == 0 && i + 1 < tokens->length) {
+            redirect_output = 1;
+            output_file = strvec_get(tokens, i + 1);
+            i++;
+        }
+        else if (strcmp(token, ">>") == 0 && i + 1 < tokens->length) {
+            append_output = 1;
+            output_file = strvec_get(tokens, i + 1);
+            i++;
+        }
+        else {
+            args[arg_index] = token;
+            arg_index++;
+        }
     }
-    args[i] = NULL;
+    args[arg_index] = NULL;
 
-    execvp(args[0], args);
-    perror("exec");
-    return -1;
+    if (redirect_input == 1) {
+        file_in = open(input_file, O_RDONLY);
+        if (file_in == -1) {
+            perror("Failed to open input file");
+            return -1;
+        }
+        dup2(file_in, STDIN_FILENO);
+        close(file_in);
+    }
 
-    // TODO Task 3: Extend this function to perform output redirection before exec()'ing
-    // Check for '<' (redirect input), '>' (redirect output), '>>' (redirect and append output)
-    // entries inside of 'tokens' (the strvec_find() function will do this for you)
-    // Open the necessary file for reading (<), writing (>), or appending (>>)
-    // Use dup2() to redirect stdin (<), stdout (> or >>)
-    // DO NOT pass redirection operators and file names to exec()'d program
-    // E.g., "ls -l > out.txt" should be exec()'d with strings "ls", "-l", NULL
+    if (redirect_output == 1) {
+        file_out = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        if (file_out == -1) {
+            perror("Failed to open output file");
+            return -1;
+        }
+        dup2(file_out, STDOUT_FILENO);
+        close(file_out);
+    }
+
+    if (append_output == 1) {
+        file_out = open(output_file, O_WRONLY | O_CREAT | O_APPEND, S_IRUSR | S_IWUSR);
+        if (file_out == -1) {
+            perror("Failed to open output file");
+            return -1;
+        }
+        dup2(file_out, STDOUT_FILENO);
+        close(file_out);
+    }
+
+    if (execvp(args[0], args) == -1) {
+        perror("exec");
+        return -1;
+    }
 
     // TODO Task 4: You need to do two items of setup before exec()'ing
     // 1. Restore the signal handlers for SIGTTOU and SIGTTIN to their defaults.
