@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "job_list.h"
 #include "string_vector.h"
@@ -105,64 +106,191 @@ int run_command(strvec_t *tokens) {
         close(file_out);
     }
 
+    struct sigaction sa;
+    sa.sa_handler = SIG_DFL;
+    if (sigfillset(&sa.sa_mask) == -1) {
+        perror("sigfillset");
+        return -1;
+    }
+
+    sa.sa_flags = 0;
+    if (sigaction(SIGTTIN, &sa, NULL) == -1 || sigaction(SIGTTOU, &sa, NULL) == -1) {
+        perror("sigaction");
+        return -1;
+    }
+
+    pid_t pid = getpid();
+    if (setpgid(pid, pid) == -1) {
+        perror("Failed to set process group");
+        return -1;
+    }
+
     if (execvp(args[0], args) == -1) {
         perror("exec");
         return -1;
     }
 
-    // TODO Task 4: You need to do two items of setup before exec()'ing
-    // 1. Restore the signal handlers for SIGTTOU and SIGTTIN to their defaults.
-    // The code in main() within swish.c sets these handlers to the SIG_IGN value.
-    // Adapt this code to use sigaction() to set the handlers to the SIG_DFL value.
-    // 2. Change the process group of this process (a child of the main shell).
-    // Call getpid() to get its process ID then call setpgid() and use this process
-    // ID as the value for the new process group ID
-
     return 0;
 }
 
 int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
-    // TODO Task 5: Implement the ability to resume stopped jobs in the foreground
-    // 1. Look up the relevant job information (in a job_t) from the jobs list
-    //    using the index supplied by the user (in tokens index 1)
-    //    Feel free to use sscanf() or atoi() to convert this string to an int
-    // 2. Call tcsetpgrp(STDIN_FILENO, <job_pid>) where job_pid is the job's process ID
-    // 3. Send the process the SIGCONT signal with the kill() system call
-    // 4. Use the same waitpid() logic as in main -- don't forget WUNTRACED
-    // 5. If the job has terminated (not stopped), remove it from the 'jobs' list
-    // 6. Call tcsetpgrp(STDIN_FILENO, <shell_pid>). shell_pid is the *current*
-    //    process's pid, since we call this function from the main shell process
+    struct sigaction sa_chld;
+    sa_chld.sa_handler = SIG_IGN;
+    sa_chld.sa_flags = 0;
+    sigemptyset(&sa_chld.sa_mask);
+    if (sigaction(SIGCHLD, &sa_chld, NULL) == -1) {
+        perror("Failed to install SIGCHLD handler");
+        return -1;
+    }
 
-    // TODO Task 6: Implement the ability to resume stopped jobs in the background.
-    // This really just means omitting some of the steps used to resume a job in the foreground:
-    // 1. DO NOT call tcsetpgrp() to manipulate foreground/background terminal process group
-    // 2. DO NOT call waitpid() to wait on the job
-    // 3. Make sure to modify the 'status' field of the relevant job list entry to BACKGROUND
-    //    (as it was STOPPED before this)
+
+    if (tokens->length < 2) {
+        fprintf(stderr, "Error: Insufficient arguments\n");
+        return -1;
+    }
+
+    int job_idx = atoi(strvec_get(tokens, 1));
+
+    job_t *job = job_list_get(jobs, job_idx);
+    if (!job) {
+        fprintf(stderr, "Job %d not found\n", job_idx);
+        return -1;
+    }
+
+    if (kill(job->pid, SIGCONT) == -1) {
+        perror("kill");
+        return -1;
+    }
+
+    if (is_foreground) {
+        int status;
+        pid_t wait_pid;
+
+        sigset_t block_mask, old_mask;
+        sigfillset(&block_mask);
+        if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
+            perror("sigprocmask");
+            return -1;
+        }
+
+        do {
+            wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        } while (wait_pid == -1 && errno == EINTR);
+
+        if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
+            perror("sigprocmask restore");
+            return -1;
+        }
+
+        if (wait_pid == -1) {
+            perror("waitpid");
+            return -1;
+        }
+
+        if (WIFSTOPPED(status)) {
+            job->status = STOPPED;
+        } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            job_list_remove(jobs, job_idx);
+        }
+    }
+
+
+    else {
+        job->status = BACKGROUND;
+    }
 
     return 0;
 }
 
 int await_background_job(strvec_t *tokens, job_list_t *jobs) {
-    // TODO Task 6: Wait for a specific job to stop or terminate
-    // 1. Look up the relevant job information (in a job_t) from the jobs list
-    //    using the index supplied by the user (in tokens index 1)
-    // 2. Make sure the job's status is BACKGROUND (no sense waiting for a stopped job)
-    // 3. Use waitpid() to wait for the job to terminate, as you have in resume_job() and main().
-    // 4. If the process terminates (is not stopped by a signal) remove it from the jobs list
+    if (tokens->length < 2) {
+        fprintf(stderr, "Usage: wait-for <job_number>\n");
+        return -1;
+    }
+
+    int job_idx = atoi(strvec_get(tokens, 1));
+
+    job_t *job = job_list_get(jobs, job_idx);
+    if (!job) {
+        fprintf(stderr, "Job %d not found\n", job_idx);
+        return -1;
+    }
+
+    int status;
+    pid_t wait_pid;
+
+    sigset_t block_mask, old_mask;
+    sigfillset(&block_mask);
+    if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
+        perror("sigprocmask");
+        return -1;
+    }
+
+    do {
+        wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        if (wait_pid == -1 && errno == EINTR) {
+            fprintf(stderr, "waitpid: Interrupted system call (retrying)\n");
+        }
+    } while (wait_pid == -1 && errno == EINTR);
+
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
+        perror("sigprocmask restore");
+        return -1;
+    }
+
+    if (wait_pid == -1) {
+        perror("waitpid");
+        return -1;
+    }
+
+    if (WIFSTOPPED(status)) {
+        job->status = STOPPED;
+    } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        job_list_remove(jobs, job_idx);
+    }
 
     return 0;
 }
 
 int await_all_background_jobs(job_list_t *jobs) {
-    // TODO Task 6: Wait for all background jobs to stop or terminate
-    // 1. Iterate through the jobs list, ignoring any stopped jobs
-    // 2. For a background job, call waitpid() with WUNTRACED.
-    // 3. If the job has stopped (check with WIFSTOPPED), change its
-    //    status to STOPPED. If the job has terminated, do nothing until the
-    //    next step (don't attempt to remove it while iterating through the list).
-    // 4. Remove all background jobs (which have all just terminated) from jobs list.
-    //    Use the job_list_remove_by_status() function.
+    int status;
+    pid_t wait_pid;
+
+    for (unsigned i = 0; i < jobs->length; i++) {
+        job_t *job = job_list_get(jobs, i);
+
+        if (job->status == STOPPED) {
+            continue;
+        }
+
+        sigset_t block_mask, old_mask;
+        sigfillset(&block_mask);
+        if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
+            perror("sigprocmask");
+            return -1;
+        }
+
+        do {
+            wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        } while (wait_pid == -1 && errno == EINTR);
+
+        if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
+            perror("sigprocmask restore");
+            return -1;
+        }
+
+        if (wait_pid == -1) {
+            perror("waitpid");
+            return -1;
+        }
+
+        if (WIFSTOPPED(status)) {
+            job->status = STOPPED;
+        } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+            job_list_remove(jobs, i);
+            i--;
+        }
+    }
 
     return 0;
 }
