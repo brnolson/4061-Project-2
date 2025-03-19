@@ -162,7 +162,6 @@ int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
         int status;
         pid_t wait_pid;
 
-        // Block all signals during waitpid
         sigset_t block_mask, old_mask;
         sigfillset(&block_mask);
         if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
@@ -170,12 +169,10 @@ int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
             return -1;
         }
 
-        // Retry waitpid until it succeeds or returns an actual error
         do {
             wait_pid = waitpid(job->pid, &status, WUNTRACED);
         } while (wait_pid == -1 && errno == EINTR);
 
-        // Restore original signal mask
         if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
             perror("sigprocmask restore");
             return -1;
@@ -218,7 +215,6 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
     int status;
     pid_t wait_pid;
 
-    // Block all signals during waitpid to prevent interruptions
     sigset_t block_mask, old_mask;
     sigfillset(&block_mask);
     if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
@@ -226,16 +222,13 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
         return -1;
     }
 
-    // Retry waitpid if interrupted (EINTR)
     do {
         wait_pid = waitpid(job->pid, &status, WUNTRACED);
         if (wait_pid == -1 && errno == EINTR) {
-            // Log the interruption and retry
             fprintf(stderr, "waitpid: Interrupted system call (retrying)\n");
         }
     } while (wait_pid == -1 && errno == EINTR);
 
-    // Restore the original signal mask after waitpid
     if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
         perror("sigprocmask restore");
         return -1;
@@ -273,7 +266,6 @@ int await_all_background_jobs(job_list_t *jobs) {
             return -1;
         }
 
-        // Retry waitpid if interrupted
         do {
             wait_pid = waitpid(job->pid, &status, WUNTRACED);
         } while (wait_pid == -1 && errno == EINTR);
@@ -292,7 +284,7 @@ int await_all_background_jobs(job_list_t *jobs) {
             job->status = STOPPED;
         } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
             job_list_remove(jobs, i);
-            i--; // Adjust index since job is removed
+            i--;
         }
     }
 
