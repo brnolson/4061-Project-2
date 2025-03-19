@@ -1,0 +1,3 @@
+@> wc -c -m -l -L -w < test_cases/resources/gatsby.txt
+6772  51187 306224 306224     74
+@> exit
