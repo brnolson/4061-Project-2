@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
+#include <errno.h>
 
 #include "job_list.h"
 #include "string_vector.h"
@@ -159,7 +159,23 @@ int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
 
     if (is_foreground) {
         int status;
-        pid_t wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        pid_t wait_pid;
+
+        sigset_t block_mask, old_mask;
+        sigfillset(&block_mask);
+        if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
+            perror("sigprocmask");
+            return -1;
+        }
+
+        do {
+            wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        } while (wait_pid == -1 && errno == EINTR);
+
+        if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
+            perror("sigprocmask restore");
+            return -1;
+        }
 
         if (wait_pid == -1) {
             perror("waitpid");
@@ -168,11 +184,12 @@ int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
 
         if (WIFSTOPPED(status)) {
             job->status = STOPPED;
-        }
-        else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
             job_list_remove(jobs, job_idx);
         }
     }
+
+
     else {
         job->status = BACKGROUND;
     }
@@ -195,7 +212,26 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
     }
 
     int status;
-    pid_t wait_pid = waitpid(job->pid, &status, WUNTRACED);
+    pid_t wait_pid;
+
+    sigset_t block_mask, old_mask;
+    sigfillset(&block_mask);
+    if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
+        perror("sigprocmask");
+        return -1;
+    }
+
+    do {
+        wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        if (wait_pid == -1 && errno == EINTR) {
+            fprintf(stderr, "waitpid: Interrupted system call (retrying)\n");
+        }
+    } while (wait_pid == -1 && errno == EINTR);
+
+    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
+        perror("sigprocmask restore");
+        return -1;
+    }
 
     if (wait_pid == -1) {
         perror("waitpid");
@@ -204,8 +240,7 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
 
     if (WIFSTOPPED(status)) {
         job->status = STOPPED;
-    }
-    else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+    } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
         job_list_remove(jobs, job_idx);
     }
 
@@ -213,6 +248,9 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
 }
 
 int await_all_background_jobs(job_list_t *jobs) {
+    int status;
+    pid_t wait_pid;
+
     for (unsigned i = 0; i < jobs->length; i++) {
         job_t *job = job_list_get(jobs, i);
 
@@ -220,8 +258,21 @@ int await_all_background_jobs(job_list_t *jobs) {
             continue;
         }
 
-        int status;
-        pid_t wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        sigset_t block_mask, old_mask;
+        sigfillset(&block_mask);
+        if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
+            perror("sigprocmask");
+            return -1;
+        }
+
+        do {
+            wait_pid = waitpid(job->pid, &status, WUNTRACED);
+        } while (wait_pid == -1 && errno == EINTR);
+
+        if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
+            perror("sigprocmask restore");
+            return -1;
+        }
 
         if (wait_pid == -1) {
             perror("waitpid");
@@ -230,8 +281,7 @@ int await_all_background_jobs(job_list_t *jobs) {
 
         if (WIFSTOPPED(status)) {
             job->status = STOPPED;
-        }
-        else if (WIFEXITED(status) || WIFSIGNALED(status)) {
+        } else if (WIFEXITED(status) || WIFSIGNALED(status)) {
             job_list_remove(jobs, i);
             i--;
         }
