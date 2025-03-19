@@ -150,7 +150,6 @@ int main(int argc, char **argv) {
 
             if (pid < 0) {
                 perror("fork");
-                return 1;
             }
 
             else if (pid == 0) {
@@ -161,8 +160,20 @@ int main(int argc, char **argv) {
 
             else {
                 int status;
-                if (waitpid(pid, &status, 0) == -1) {
+
+                if (tcsetpgrp(STDIN_FILENO, pid) == -1) {
+                    perror("tcsetpgrp");
+                    return 1;
+                }
+
+                if (waitpid(pid, &status, WUNTRACED) == -1) {
                     perror("waitpid");
+                    return 1;
+                }
+
+                if (tcsetpgrp(STDIN_FILENO, getpid()) == -1) {
+                    perror("tcsetpgrp");
+                    return 1;
                 }
             }
 
