@@ -77,13 +77,13 @@ int main(int argc, char **argv) {
             }
             else {
                 dir = getenv("HOME");
+
+                if (dir == NULL) {
+                    fprintf(stderr, "cd: HOME not set\n");
+                }
             }
 
-            if (dir == NULL) {
-                fprintf(stderr, "cd: HOME not set\n");
-            }
-
-            else if (chdir(dir) == -1) {
+            if (chdir(dir) == -1) {
                 perror("chdir");
             }
         }
@@ -150,11 +150,12 @@ int main(int argc, char **argv) {
 
             if (pid < 0) {
                 perror("fork");
+                return 1;
             }
 
             else if (pid == 0) {
                 if (run_command(&tokens) == -1) {
-                    _exit(1);
+                    return 1;
                 }
             }
 

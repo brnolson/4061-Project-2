@@ -23,10 +23,15 @@ int tokenize(char *s, strvec_t *tokens) {
     strvec_clear(tokens);
     char *token = strtok(s, " ");
 
+    if (token == NULL) {
+        return 0;
+    }
+
     // Loop through all tokens and add it to the strvec struct
     while (token != NULL) {
         if (strvec_add(tokens, token) != 0) {
             fprintf(stderr, "Error: Failed to add token\n");
+            strvec_clear(tokens);
             return -1;
         }
         token = strtok(NULL, " ");
