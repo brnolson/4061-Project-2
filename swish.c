@@ -154,14 +154,26 @@ int main(int argc, char **argv) {
 
             else if (pid == 0) {
                 if (run_command(&tokens) == -1) {
-                    _exit(1);
+                    return 1;
                 }
             }
 
             else {
                 int status;
-                if (waitpid(pid, &status, 0) == -1) {
+
+                if (tcsetpgrp(STDIN_FILENO, pid) == -1) {
+                    perror("tcsetpgrp");
+                    return 1;
+                }
+
+                if (waitpid(pid, &status, WUNTRACED) == -1) {
                     perror("waitpid");
+                    return 1;
+                }
+
+                if (tcsetpgrp(STDIN_FILENO, getpid()) == -1) {
+                    perror("tcsetpgrp");
+                    return 1;
                 }
             }
 
