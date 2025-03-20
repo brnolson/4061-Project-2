@@ -134,27 +134,24 @@ int run_command(strvec_t *tokens) {
 }
 
 int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
-    struct sigaction sa_chld;
-    sa_chld.sa_handler = SIG_IGN;
-    sa_chld.sa_flags = 0;
-    sigemptyset(&sa_chld.sa_mask);
-    if (sigaction(SIGCHLD, &sa_chld, NULL) == -1) {
-        perror("Failed to install SIGCHLD handler");
-        return -1;
-    }
-
-
     if (tokens->length < 2) {
         fprintf(stderr, "Error: Insufficient arguments\n");
         return -1;
     }
 
     int job_idx = atoi(strvec_get(tokens, 1));
-
     job_t *job = job_list_get(jobs, job_idx);
+
     if (!job) {
-        fprintf(stderr, "Job %d not found\n", job_idx);
+        fprintf(stderr, "Job index out of bounds\n");
         return -1;
+    }
+
+    if (is_foreground) {
+        if (tcsetpgrp(STDIN_FILENO, job->pid) == -1) {
+            perror("tcsetpgrp");
+            return -1;
+        }
     }
 
     if (kill(job->pid, SIGCONT) == -1) {
@@ -166,24 +163,17 @@ int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
         int status;
         pid_t wait_pid;
 
-        sigset_t block_mask, old_mask;
-        sigfillset(&block_mask);
-        if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
-            perror("sigprocmask");
-            return -1;
-        }
-
         do {
             wait_pid = waitpid(job->pid, &status, WUNTRACED);
         } while (wait_pid == -1 && errno == EINTR);
 
-        if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
-            perror("sigprocmask restore");
+        if (wait_pid == -1) {
+            perror("waitpid");
             return -1;
         }
 
-        if (wait_pid == -1) {
-            perror("waitpid");
+        if (tcsetpgrp(STDIN_FILENO, getpid()) == -1) {
+            perror("tcsetpgrp");
             return -1;
         }
 
@@ -193,8 +183,6 @@ int resume_job(strvec_t *tokens, job_list_t *jobs, int is_foreground) {
             job_list_remove(jobs, job_idx);
         }
     }
-
-
     else {
         job->status = BACKGROUND;
     }
@@ -209,8 +197,8 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
     }
 
     int job_idx = atoi(strvec_get(tokens, 1));
-
     job_t *job = job_list_get(jobs, job_idx);
+
     if (!job) {
         fprintf(stderr, "Job %d not found\n", job_idx);
         return -1;
@@ -219,24 +207,12 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
     int status;
     pid_t wait_pid;
 
-    sigset_t block_mask, old_mask;
-    sigfillset(&block_mask);
-    if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
-        perror("sigprocmask");
-        return -1;
-    }
-
     do {
         wait_pid = waitpid(job->pid, &status, WUNTRACED);
         if (wait_pid == -1 && errno == EINTR) {
             fprintf(stderr, "waitpid: Interrupted system call (retrying)\n");
         }
     } while (wait_pid == -1 && errno == EINTR);
-
-    if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
-        perror("sigprocmask restore");
-        return -1;
-    }
 
     if (wait_pid == -1) {
         perror("waitpid");
@@ -263,21 +239,9 @@ int await_all_background_jobs(job_list_t *jobs) {
             continue;
         }
 
-        sigset_t block_mask, old_mask;
-        sigfillset(&block_mask);
-        if (sigprocmask(SIG_SETMASK, &block_mask, &old_mask) == -1) {
-            perror("sigprocmask");
-            return -1;
-        }
-
         do {
             wait_pid = waitpid(job->pid, &status, WUNTRACED);
         } while (wait_pid == -1 && errno == EINTR);
-
-        if (sigprocmask(SIG_SETMASK, &old_mask, NULL) == -1) {
-            perror("sigprocmask restore");
-            return -1;
-        }
 
         if (wait_pid == -1) {
             perror("waitpid");

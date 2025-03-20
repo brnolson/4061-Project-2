@@ -139,13 +139,13 @@ int main(int argc, char **argv) {
         }
 
         else {
-            // TODO Task 2: If the user input does not match any built-in shell command,
-            // treat the input as a program name and command-line arguments
-            // USE THE run_command() FUNCTION DEFINED IN swish_funcs.c IN YOUR IMPLEMENTATION
-            // You should take the following steps:
-            //   1. Use fork() to spawn a child process
-            //   2. Call run_command() in the child process
-            //   2. In the parent, use waitpid() to wait for the program to exit
+            // Check if the current process is a background process by checking the & token is there
+            int is_background = 0;
+            if (tokens.length > 0 && strcmp(strvec_get(&tokens, tokens.length - 1), "&") == 0) {
+                is_background = 1;
+                strvec_take(&tokens, tokens.length -1 );
+            }
+
             pid_t pid = fork();
 
             if (pid < 0) {
@@ -159,39 +159,49 @@ int main(int argc, char **argv) {
             }
 
             else {
-                int status;
-
-                if (tcsetpgrp(STDIN_FILENO, pid) == -1) {
-                    perror("tcsetpgrp");
-                    return 1;
+                if (is_background) {
+                    if (job_list_add(&jobs, pid, strvec_get(&tokens, 0), BACKGROUND) == -1) {
+                        fprintf(stderr, "Failed to add background job to list\n");
+                    }
                 }
+                else {
+                    int status;
 
-                if (waitpid(pid, &status, WUNTRACED) == -1) {
-                    perror("waitpid");
-                    return 1;
-                }
+                    if (tcsetpgrp(STDIN_FILENO, pid) == -1) {
+                        perror("tcsetpgrp");
+                        return 1;
+                    }
 
-                if (tcsetpgrp(STDIN_FILENO, getpid()) == -1) {
-                    perror("tcsetpgrp");
-                    return 1;
+                    if (waitpid(pid, &status, WUNTRACED) == -1) {
+                        perror("waitpid");
+                        return 1;
+                    }
+
+                    if (tcsetpgrp(STDIN_FILENO, getpid()) == -1) {
+                        perror("tcsetpgrp");
+                        return 1;
+                    }
+
+                    if (WIFSTOPPED(status)) {
+                        job_t *new_job = malloc(sizeof(job_t));
+                        if (!new_job) {
+                            perror("malloc");
+                            return 1;
+                        }
+
+                        snprintf(new_job->name, NAME_LEN, "%.*s", NAME_LEN - 1, strvec_get(&tokens, 0));
+                        new_job->pid = pid;
+                        new_job->status = STOPPED;
+
+                        if (job_list_add(&jobs, pid, new_job->name, STOPPED) == -1) {
+                            fprintf(stderr, "Failed to add job to list\n");
+                            free(new_job);
+                            return 1;
+                        }
+                        free(new_job);
+                    }
                 }
             }
-
-            // TODO Task 4: Set the child process as the target of signals sent to the terminal
-            // via the keyboard.
-            // To do this, call 'tcsetpgrp(STDIN_FILENO, <child_pid>)', where child_pid is the
-            // child's process ID just returned by fork(). Do this in the parent process.
-
-            // TODO Task 5: Handle the issue of foreground/background terminal process groups.
-            // Do this by taking the following steps in the shell (parent) process:
-            // 1. Modify your call to waitpid(): Wait specifically for the child just forked, and
-            //    use WUNTRACED as your third argument to detect if it has stopped from a signal
-            // 2. After waitpid() has returned, call tcsetpgrp(STDIN_FILENO, <pid>) where pid is
-            //    the process ID of the shell process (use getpid() to obtain it)
-            // 3. If the child status was stopped by a signal, add it to 'jobs', the
-            //    the terminal's jobs list.
-            // You can detect if this has occurred using WIFSTOPPED on the status
-            // variable set by waitpid()
 
             // TODO Task 6: If the last token input by the user is "&", start the current
             // command in the background.
