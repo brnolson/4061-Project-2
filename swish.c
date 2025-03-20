@@ -171,16 +171,33 @@ int main(int argc, char **argv) {
                     return 1;
                 }
 
+                if (WIFSTOPPED(status)) {
+                    job_t *new_job = malloc(sizeof(job_t));
+                    if (!new_job) {
+                        perror("malloc");
+                        return 1;
+                    }
+
+                    snprintf(new_job->name, NAME_LEN, "%.*s", NAME_LEN - 1, strvec_get(&tokens, 0));
+                    new_job->pid = pid;
+                    new_job->status = STOPPED;
+
+                    if (job_list_add(&jobs, pid, new_job->name, STOPPED) == -1) {
+                        fprintf(stderr, "Failed to add job to list\n");
+                        free(new_job);
+                        return 1;
+                    }
+                }
+
                 if (tcsetpgrp(STDIN_FILENO, getpid()) == -1) {
                     perror("tcsetpgrp");
                     return 1;
                 }
-            }
 
-            // TODO Task 4: Set the child process as the target of signals sent to the terminal
-            // via the keyboard.
-            // To do this, call 'tcsetpgrp(STDIN_FILENO, <child_pid>)', where child_pid is the
-            // child's process ID just returned by fork(). Do this in the parent process.
+                // if (WIFEXITED(status)) {
+                // } else if (WIFSIGNALED(status)) {
+                // }
+            }
 
             // TODO Task 5: Handle the issue of foreground/background terminal process groups.
             // Do this by taking the following steps in the shell (parent) process:
