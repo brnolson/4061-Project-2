@@ -204,6 +204,11 @@ int await_background_job(strvec_t *tokens, job_list_t *jobs) {
         return -1;
     }
 
+    if (job->status == STOPPED) {
+        fprintf(stderr, "Job index is for stopped process not background process\n");
+        return -1;
+    }
+
     int status;
     pid_t wait_pid;
 
