@@ -82,7 +82,7 @@ int run_command(strvec_t *tokens) {
             perror("Failed to open input file");
             return -1;
         }
-        if (dup2(file_out, STDOUT_FILENO) == -1) {
+        if (dup2(file_in, STDIN_FILENO) == -1) {
             perror("dup2");
             return -1;
         }
